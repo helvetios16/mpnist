@@ -58,6 +58,15 @@ std::vector<double> normalize_image(const unsigned char *imgs, size_t n,
   return normalize;
 }
 
+int predict(const std::vector<double> &weight, double bias,
+            const std::vector<double> &x) {
+  double z = bias;
+  for (size_t i = 0; i < weight.size(); i++) {
+    z += weight[i] * x[i];
+  }
+  return (z >= 0) ? 1 : 0;
+}
+
 int main() {
   // mnist.npz es un ZIP que contiene 4 arrays .npy: x_train, y_train,
   // x_test, y_test. Cargamos el archivo completo como un mapa
@@ -121,7 +130,8 @@ int main() {
   double bias = 0.0;
 
   // Prueba
-  std::vector<double> foo = normalize_image(imgs, 1, pixel_per_img);
+  std::vector<double> foo =
+      normalize_image(imgs, x_train_bin[0], pixel_per_img);
   double min = 100.0, max = -1.0;
   for (auto v : foo) {
     if (v < min)
@@ -130,6 +140,7 @@ int main() {
       max = v;
   }
   std::cout << min << " " << max << "\n";
+  std::cout << predict(weight, bias, foo) << "\n";
 
   return 0;
 }
