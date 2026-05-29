@@ -97,6 +97,21 @@ void training(std::vector<int> &x_train_bin, const unsigned char *imgs,
   }
 }
 
+void evaluate(const std::vector<int> &x_test_bin,
+              const unsigned char *labels_test,
+              const std::vector<double> &weights, const double &bias,
+              const unsigned char *imgs, const size_t pixel_per_img) {
+  int succeses = 0;
+  for (size_t i = 0; i < x_test_bin.size(); i++) {
+    std::vector<double> x = normalize_image(imgs, x_test_bin[i], pixel_per_img);
+    const int target = static_cast<int>(labels_test[x_test_bin[i]]);
+    const int predi = predict(weights, bias, x);
+    if (predi == target)
+      succeses++;
+  }
+  std::cout << "Results: " << 100.0 * succeses / x_test_bin.size() << "%\n";
+}
+
 int main() {
   // mnist.npz es un ZIP que contiene 4 arrays .npy: x_train, y_train,
   // x_test, y_test. Cargamos el archivo completo como un mapa
@@ -173,6 +188,43 @@ int main() {
   std::cout << predict(weight, bias, foo) << "\n";
 
   training(x_train_bin, imgs, labels, bias, pixel_per_img, weight, 0.1, 5);
+
+  const unsigned char *imgs_test = x_test.data<unsigned char>();
+  const unsigned char *labels_test = y_test.data<unsigned char>();
+
+  const size_t count_test = x_test.shape[0];
+
+  std::vector<int> x_test_bin;
+
+  for (size_t n = 0; n < count_test; n++) {
+    if (numbers.count(labels_test[n]))
+      x_test_bin.push_back(n);
+  }
+
+  std::cout << x_test_bin.size() << "\n";
+
+  evaluate(x_test_bin, labels_test, weight, bias, imgs_test, pixel_per_img);
+
+  auto horizontal_border = [width]() {
+    std::cout << '+';
+    for (size_t col = 0; col < width; col++)
+      std::cout << '-';
+    std::cout << "+\n";
+  };
+
+  std::cout << "weights\n";
+  static const char ramp[] = " .:-=+*#%@";
+  horizontal_border();
+  for (size_t row = 0; row < height; row++) {
+    std::cout << '|';
+    for (size_t col = 0; col < width; col++) {
+      unsigned char p = weight[row * width + col];
+      int level = (p * 9) / 255;
+      std::cout << ramp[level];
+    }
+    std::cout << "|\n";
+  }
+  horizontal_border();
 
   return 0;
 }
