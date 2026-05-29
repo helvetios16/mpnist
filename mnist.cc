@@ -47,6 +47,40 @@ bool draw_image(const unsigned char *imgs, const unsigned char *labels,
   return true;
 }
 
+bool draw_weights(const std::vector<double> &weights, const size_t &width,
+                  const size_t &height) {
+  double wmin = 1e9, wmax = -1e9;
+  for (double w : weights) {
+    if (w > wmax)
+      wmax = w;
+    if (w < wmin)
+      wmin = w;
+  }
+
+  auto horizontal_border = [width]() {
+    std::cout << '+';
+    for (size_t col = 0; col < width; col++)
+      std::cout << '-';
+    std::cout << "+\n";
+  };
+
+  std::cout << "weights\n";
+  static const char ramp[] = " .:-=+*#%@";
+  horizontal_border();
+  for (size_t row = 0; row < height; row++) {
+    std::cout << '|';
+    for (size_t col = 0; col < width; col++) {
+      double w = weights[row * width + col];
+      int level = static_cast<int>((w - wmin) / (wmax - wmin) * 9);
+      std::cout << ramp[level];
+    }
+    std::cout << "|\n";
+  }
+  horizontal_border();
+
+  return true;
+}
+
 std::vector<double> normalize_image(const unsigned char *imgs, size_t n,
                                     size_t pixel_per_img) {
   std::vector<double> normalize(pixel_per_img, 0.0);
@@ -171,7 +205,7 @@ int main() {
 
   std::cout << x_train_bin.size() << "\n";
 
-  std::vector<double> weight(pixel_per_img, 0.0);
+  std::vector<double> weights(pixel_per_img, 0.0);
   double bias = 0.0;
 
   // Prueba
@@ -185,9 +219,9 @@ int main() {
       max = v;
   }
   std::cout << min << " " << max << "\n";
-  std::cout << predict(weight, bias, foo) << "\n";
+  std::cout << predict(weights, bias, foo) << "\n";
 
-  training(x_train_bin, imgs, labels, bias, pixel_per_img, weight, 0.1, 5);
+  training(x_train_bin, imgs, labels, bias, pixel_per_img, weights, 0.1, 5);
 
   const unsigned char *imgs_test = x_test.data<unsigned char>();
   const unsigned char *labels_test = y_test.data<unsigned char>();
@@ -203,28 +237,9 @@ int main() {
 
   std::cout << x_test_bin.size() << "\n";
 
-  evaluate(x_test_bin, labels_test, weight, bias, imgs_test, pixel_per_img);
+  evaluate(x_test_bin, labels_test, weights, bias, imgs_test, pixel_per_img);
 
-  auto horizontal_border = [width]() {
-    std::cout << '+';
-    for (size_t col = 0; col < width; col++)
-      std::cout << '-';
-    std::cout << "+\n";
-  };
-
-  std::cout << "weights\n";
-  static const char ramp[] = " .:-=+*#%@";
-  horizontal_border();
-  for (size_t row = 0; row < height; row++) {
-    std::cout << '|';
-    for (size_t col = 0; col < width; col++) {
-      unsigned char p = weight[row * width + col];
-      int level = (p * 9) / 255;
-      std::cout << ramp[level];
-    }
-    std::cout << "|\n";
-  }
-  horizontal_border();
+  draw_weights(weights, width, height);
 
   return 0;
 }
