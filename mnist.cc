@@ -1,6 +1,8 @@
 #include "cnpy.h"
 #include <cstdio>
 #include <iostream>
+#include <set>
+#include <vector>
 
 // Dibuja la imagen 'n' como arte ASCII con su etiqueta y un marco.
 // 'count' es el numero total de imagenes disponibles (p.ej. 60000): si 'n' se
@@ -45,6 +47,17 @@ bool draw_image(const unsigned char *imgs, const unsigned char *labels,
   return true;
 }
 
+std::vector<double> normalize_image(const unsigned char *imgs, size_t n,
+                                    size_t pixel_per_img) {
+  std::vector<double> normalize(pixel_per_img, 0.0);
+  const unsigned char *img = imgs + n * pixel_per_img;
+
+  for (size_t i = 0; i < pixel_per_img; i++)
+    normalize[i] = img[i] / 255.0;
+
+  return normalize;
+}
+
 int main() {
   // mnist.npz es un ZIP que contiene 4 arrays .npy: x_train, y_train,
   // x_test, y_test. Cargamos el archivo completo como un mapa
@@ -86,9 +99,37 @@ int main() {
   const size_t height = x_train.shape[1];
   const size_t width = x_train.shape[2];
 
+  const size_t pixel_per_img = height * width;
+
   // Dibujamos las primeras 3 imagenes como arte ASCII junto a su etiqueta.
-  for (size_t n = 0; n < 3; n++)
-    draw_image(imgs, labels, n, count, height, width);
+  // for (size_t n = 0; n < 3; n++)
+  //   draw_image(imgs, labels, n, count, height, width);
+
+  draw_image(imgs, labels, 50, count, height, width);
+
+  std::set<int> numbers = {0, 1};
+  std::vector<int> x_train_bin;
+
+  for (size_t n = 0; n < count; n++) {
+    if (numbers.count(labels[n]))
+      x_train_bin.push_back(n);
+  }
+
+  std::cout << x_train_bin.size() << "\n";
+
+  std::vector<double> weight(pixel_per_img, 0.0);
+  double bias = 0.0;
+
+  // Prueba
+  std::vector<double> foo = normalize_image(imgs, 1, pixel_per_img);
+  double min = 100.0, max = -1.0;
+  for (auto v : foo) {
+    if (v < min)
+      min = v;
+    if (v > max)
+      max = v;
+  }
+  std::cout << min << " " << max << "\n";
 
   return 0;
 }
