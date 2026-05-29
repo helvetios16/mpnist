@@ -67,6 +67,36 @@ int predict(const std::vector<double> &weight, double bias,
   return (z >= 0) ? 1 : 0;
 }
 
+void training(std::vector<int> &x_train_bin, const unsigned char *imgs,
+              const unsigned char *labels, double &bias,
+              const size_t pixel_per_img, std::vector<double> &weights,
+              double lr, int epochs) {
+  int total = epochs;
+  while (epochs > 0) {
+    int succeses = 0;
+
+    for (size_t i = 0; i < x_train_bin.size(); i++) {
+      std::vector<double> x =
+          normalize_image(imgs, x_train_bin[i], pixel_per_img);
+      const int target = static_cast<int>(labels[x_train_bin[i]]);
+      const int predi = predict(weights, bias, x);
+      if (predi == target)
+        succeses++;
+      int error = target - predi;
+
+      if (error != 0) {
+        for (size_t v = 0; v < weights.size(); v++) {
+          weights[v] += lr * error * x[v];
+        }
+        bias += lr * error;
+      }
+    }
+    std::cout << "Epochs " << total - epochs + 1 << ": "
+              << 100.0 * succeses / x_train_bin.size() << "%\n";
+    epochs--;
+  }
+}
+
 int main() {
   // mnist.npz es un ZIP que contiene 4 arrays .npy: x_train, y_train,
   // x_test, y_test. Cargamos el archivo completo como un mapa
@@ -141,6 +171,8 @@ int main() {
   }
   std::cout << min << " " << max << "\n";
   std::cout << predict(weight, bias, foo) << "\n";
+
+  training(x_train_bin, imgs, labels, bias, pixel_per_img, weight, 0.1, 5);
 
   return 0;
 }
