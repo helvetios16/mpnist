@@ -20,32 +20,34 @@ bool draw_image(const unsigned char *imgs, const unsigned char *labels,
 
   // Rampa de 10 niveles: de mas oscuro (espacio) a mas claro (@).
   // El indice se obtiene escalando el valor 0-255 al rango 0-9.
-  static const char ramp[] = " .:-=+*#%@";
+  static const char *ramp[] = {" ", "░", "▒", "▓", "█"};
+  const int levels = 5;
 
   const size_t pixel_per_img = height * width;
   const unsigned char *img = imgs + n * pixel_per_img;
 
   // Borde horizontal "+----...----+" que encaja con los lados "|" de cada fila
   // (mide width + 2 para incluir las dos columnas de los bordes laterales).
-  auto horizontal_border = [width]() {
-    std::cout << '+';
+  auto horizontal_border = [width](const char *left, const char *mid,
+                                   const char *right) {
+    std::cout << left;
     for (size_t col = 0; col < width; col++)
-      std::cout << '-';
-    std::cout << "+\n";
+      std::cout << mid;
+    std::cout << right << "\n";
   };
 
   std::cout << "Label = " << static_cast<int>(labels[n]) << "\n";
-  horizontal_border();
+  horizontal_border("┌", "─", "┐");
   for (size_t row = 0; row < height; row++) {
-    std::cout << '|';
+    std::cout << "│";
     for (size_t col = 0; col < width; col++) {
       unsigned char p = img[row * width + col];
-      int level = (p * 9) / 255;
+      int level = (p * (levels - 1)) / 255;
       std::cout << ramp[level];
     }
-    std::cout << "|\n";
+    std::cout << "│\n";
   }
-  horizontal_border();
+  horizontal_border("└", "─", "┘");
   return true;
 }
 
@@ -59,26 +61,30 @@ bool draw_weights(const std::vector<float> &weights, const size_t &width,
       wmin = w;
   }
 
-  auto horizontal_border = [width]() {
-    std::cout << '+';
+  auto horizontal_border = [width](const char *left, const char *mid,
+                                   const char *right) {
+    std::cout << left;
     for (size_t col = 0; col < width; col++)
-      std::cout << '-';
-    std::cout << "+\n";
+      std::cout << mid;
+    std::cout << right << "\n";
   };
 
   std::cout << "weights\n";
-  static const char ramp[] = " .:-=+*#%@";
-  horizontal_border();
+  static const char *ramp[] = {" ", "░", "▒", "▓", "█"};
+  const int levels = 5;
+
+  horizontal_border("┌", "─", "┐");
   for (size_t row = 0; row < height; row++) {
-    std::cout << '|';
+    std::cout << "│";
+
     for (size_t col = 0; col < width; col++) {
       float w = weights[row * width + col];
-      int level = static_cast<int>((w - wmin) / (wmax - wmin) * 9);
+      int level = static_cast<int>((w - wmin) / (wmax - wmin) * (levels - 1));
       std::cout << ramp[level];
     }
-    std::cout << "|\n";
+    std::cout << "│\n";
   }
-  horizontal_border();
+  horizontal_border("└", "─", "┘");
 
   return true;
 }
@@ -353,10 +359,10 @@ int main() {
 
   evaluate_multi(X_test_all, XA_test, labels_test, W, B, pixel_per_img);
 
-  // for (int i = 0; i < W.size(); i++) {
-  //   std::cout << i << " ";
-  //   draw_weights(W[i], width, height);
-  // }
+  for (int i = 0; i < W.size(); i++) {
+    std::cout << i << " ";
+    draw_weights(W[i], width, height);
+  }
 
   return 0;
 }
