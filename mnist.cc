@@ -1,7 +1,6 @@
 #include "cnpy.h"
 #include <cstdio>
 #include <iostream>
-#include <random>
 #include <set>
 #include <vector>
 
@@ -48,10 +47,10 @@ bool draw_image(const unsigned char *imgs, const unsigned char *labels,
   return true;
 }
 
-bool draw_weights(const std::vector<double> &weights, const size_t &width,
+bool draw_weights(const std::vector<float> &weights, const size_t &width,
                   const size_t &height) {
-  double wmin = 1e9, wmax = -1e9;
-  for (double w : weights) {
+  float wmin = 1e9, wmax = -1e9;
+  for (float w : weights) {
     if (w > wmax)
       wmax = w;
     if (w < wmin)
@@ -71,7 +70,7 @@ bool draw_weights(const std::vector<double> &weights, const size_t &width,
   for (size_t row = 0; row < height; row++) {
     std::cout << '|';
     for (size_t col = 0; col < width; col++) {
-      double w = weights[row * width + col];
+      float w = weights[row * width + col];
       int level = static_cast<int>((w - wmin) / (wmax - wmin) * 9);
       std::cout << ramp[level];
     }
@@ -82,9 +81,9 @@ bool draw_weights(const std::vector<double> &weights, const size_t &width,
   return true;
 }
 
-std::vector<double> normalize_image(const unsigned char *imgs, size_t n,
-                                    size_t pixel_per_img) {
-  std::vector<double> normalize(pixel_per_img, 0.0);
+std::vector<float> normalize_image(const unsigned char *imgs, size_t n,
+                                   size_t pixel_per_img) {
+  std::vector<float> normalize(pixel_per_img, 0.0);
   const unsigned char *img = imgs + n * pixel_per_img;
 
   for (size_t i = 0; i < pixel_per_img; i++)
@@ -93,24 +92,24 @@ std::vector<double> normalize_image(const unsigned char *imgs, size_t n,
   return normalize;
 }
 
-int predict(const std::vector<double> &weight, double bias, const double *x) {
-  double z = bias;
+int predict(const std::vector<float> &weight, float bias, const float *x) {
+  float z = bias;
   for (size_t i = 0; i < weight.size(); i++) {
     z += weight[i] * x[i];
   }
   return (z >= 0) ? 1 : 0;
 }
 
-void training(const std::vector<double> &X, std::vector<int> &x_train_bin,
-              const unsigned char *labels, double &bias,
-              const size_t pixel_per_img, std::vector<double> &weights,
-              double lr, int epochs) {
+void training(const std::vector<float> &X, std::vector<int> &x_train_bin,
+              const unsigned char *labels, float &bias,
+              const size_t pixel_per_img, std::vector<float> &weights, float lr,
+              int epochs) {
   int total = epochs;
   while (epochs > 0) {
     int succeses = 0;
 
     for (size_t i = 0; i < x_train_bin.size(); i++) {
-      const double *x = &X[i * pixel_per_img];
+      const float *x = &X[i * pixel_per_img];
       const int target = static_cast<int>(labels[x_train_bin[i]]);
       const int predi = predict(weights, bias, x);
       if (predi == target)
@@ -130,13 +129,13 @@ void training(const std::vector<double> &X, std::vector<int> &x_train_bin,
   }
 }
 
-void evaluate(const std::vector<double> &X, const std::vector<int> &x_test_bin,
+void evaluate(const std::vector<float> &X, const std::vector<int> &x_test_bin,
               const unsigned char *labels_test,
-              const std::vector<double> &weights, const double &bias,
+              const std::vector<float> &weights, const float &bias,
               const size_t pixel_per_img) {
   int succeses = 0;
   for (size_t i = 0; i < x_test_bin.size(); i++) {
-    const double *x = &X[i * pixel_per_img];
+    const float *x = &X[i * pixel_per_img];
     const int target = static_cast<int>(labels_test[x_test_bin[i]]);
     const int predi = predict(weights, bias, x);
     if (predi == target)
@@ -145,10 +144,10 @@ void evaluate(const std::vector<double> &X, const std::vector<int> &x_test_bin,
   std::cout << "Results: " << 100.0 * succeses / x_test_bin.size() << "%\n";
 }
 
-std::vector<double> build_dataset(const std::vector<int> &index,
-                                  const unsigned char *imgs,
-                                  size_t pixel_per_img) {
-  std::vector<double> X(index.size() * pixel_per_img);
+std::vector<float> build_dataset(const std::vector<int> &index,
+                                 const unsigned char *imgs,
+                                 size_t pixel_per_img) {
+  std::vector<float> X(index.size() * pixel_per_img);
   for (size_t i = 0; i < index.size(); i++) {
     const unsigned char *img = imgs + index[i] * pixel_per_img;
     for (size_t p = 0; p < pixel_per_img; p++) {
@@ -217,15 +216,14 @@ int main() {
 
   std::cout << x_train_bin.size() << "\n";
 
-  std::vector<double> X_train = build_dataset(x_train_bin, imgs, pixel_per_img);
+  std::vector<float> X_train = build_dataset(x_train_bin, imgs, pixel_per_img);
 
-  std::vector<double> weights(pixel_per_img, 0.0);
-  double bias = 0.0;
+  std::vector<float> weights(pixel_per_img, 0.0);
+  float bias = 0.0;
 
   // Prueba
-  std::vector<double> foo =
-      normalize_image(imgs, x_train_bin[0], pixel_per_img);
-  double min = 100.0, max = -1.0;
+  std::vector<float> foo = normalize_image(imgs, x_train_bin[0], pixel_per_img);
+  float min = 100.0, max = -1.0;
   for (auto v : foo) {
     if (v < min)
       min = v;
@@ -251,7 +249,7 @@ int main() {
 
   std::cout << x_test_bin.size() << "\n";
 
-  std::vector<double> X_test =
+  std::vector<float> X_test =
       build_dataset(x_test_bin, imgs_test, pixel_per_img);
 
   evaluate(X_test, x_test_bin, labels_test, weights, bias, pixel_per_img);
