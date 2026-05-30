@@ -1,4 +1,6 @@
 #include "cnpy.h"
+#include <cerrno>
+#include <cstddef>
 #include <cstdio>
 #include <iostream>
 #include <set>
@@ -144,17 +146,90 @@ void evaluate(const std::vector<float> &X, const std::vector<int> &x_test_bin,
   std::cout << "Results: " << 100.0 * succeses / x_test_bin.size() << "%\n";
 }
 
-std::vector<float> build_dataset(const std::vector<int> &index,
+std::vector<float> build_dataset(const std::vector<int> &data,
                                  const unsigned char *imgs,
                                  size_t pixel_per_img) {
-  std::vector<float> X(index.size() * pixel_per_img);
-  for (size_t i = 0; i < index.size(); i++) {
-    const unsigned char *img = imgs + index[i] * pixel_per_img;
+  std::vector<float> X(data.size() * pixel_per_img);
+  for (size_t i = 0; i < data.size(); i++) {
+    const unsigned char *img = imgs + data[i] * pixel_per_img;
     for (size_t p = 0; p < pixel_per_img; p++) {
       X[i * pixel_per_img + p] = img[p] / 255.0;
     }
   }
   return X;
+}
+
+float score(const std::vector<float> &weights, float bias, const float *x) {
+  float z = bias;
+  for (size_t i = 0; i < weights.size(); i++) {
+    z += weights[i] * x[i];
+  }
+  return z;
+}
+
+int predict_class(const std::vector<std::vector<float>> &W,
+                  const std::vector<float> &B, const float *x) {
+  size_t best_class = 0;
+  float best_score = -1e9;
+  for (size_t i = 0; i < B.size(); i++) {
+    float z = score(W[i], B[i], x);
+    if (z > best_score) {
+      best_score = z;
+      best_class = i;
+    }
+  }
+  return best_class;
+}
+
+void training_multi(const std::vector<float> &X,
+                    const std::vector<int> &X_train,
+                    const unsigned char *labels,
+                    std::vector<std::vector<float>> &W, std::vector<float> &B,
+                    const size_t pixel_per_img, float lr, int epochs) {
+  int total = epochs;
+  while (epochs > 0) {
+    int succeses = 0;
+
+    for (size_t i = 0; i < X_train.size(); i++) {
+      const float *x = &X[i * pixel_per_img];
+      const int label = static_cast<int>(labels[X_train[i]]);
+
+      if (predict_class(W, B, x) == label)
+        succeses++;
+
+      for (size_t k = 0; k < B.size(); k++) {
+        const int target = (label == (int)k) ? 1 : 0;
+        const int pred = (score(W[k], B[k], x) >= 0) ? 1 : 0;
+        const int error = target - pred;
+
+        if (error != 0) {
+          for (size_t v = 0; v < W[k].size(); v++) {
+            W[k][v] += lr * error * x[v];
+          }
+          B[k] += lr * error;
+        }
+      }
+    }
+
+    std::cout << "Epochs " << total - epochs + 1 << ": "
+              << 100.0 * succeses / X_train.size() << "%\n";
+    epochs--;
+  }
+}
+
+void evaluate_multi(const std::vector<float> &X, const std::vector<int> &X_test,
+                    const unsigned char *labels,
+                    const std::vector<std::vector<float>> &W,
+                    const std::vector<float> &B, const size_t pixel_per_img) {
+  int succeses = 0;
+  for (size_t i = 0; i < X_test.size(); i++) {
+    const float *x = &X[i * pixel_per_img];
+    const int label = static_cast<int>(labels[X_test[i]]);
+
+    if (predict_class(W, B, x) == label)
+      succeses++;
+  }
+  std::cout << "Results: " << 100.0 * succeses / X_test.size() << "%\n";
 }
 
 int main() {
@@ -218,6 +293,7 @@ int main() {
 
   std::vector<float> X_train = build_dataset(x_train_bin, imgs, pixel_per_img);
 
+  // 0 - 1
   std::vector<float> weights(pixel_per_img, 0.0);
   float bias = 0.0;
 
@@ -254,7 +330,33 @@ int main() {
 
   evaluate(X_test, x_test_bin, labels_test, weights, bias, pixel_per_img);
 
-  draw_weights(weights, width, height);
+  // draw_weights(weights, width, height);
+
+  std::vector<int> XA_train;
+  for (int i = 0; i < count; i++)
+    XA_train.push_back(i);
+
+  std::vector<float> X_train_all = build_dataset(XA_train, imgs, pixel_per_img);
+
+  // 0 - 9
+  std::vector<std::vector<float>> W(10, std::vector<float>(pixel_per_img, 0.0));
+  std::vector<float> B(10, 0.0);
+
+  training_multi(X_train_all, XA_train, labels, W, B, pixel_per_img, 0.1, 5);
+
+  std::vector<int> XA_test;
+  for (int i = 0; i < count_test; i++)
+    XA_test.push_back(i);
+
+  std::vector<float> X_test_all =
+      build_dataset(XA_test, imgs_test, pixel_per_img);
+
+  evaluate_multi(X_test_all, XA_test, labels_test, W, B, pixel_per_img);
+
+  // for (int i = 0; i < W.size(); i++) {
+  //   std::cout << i << " ";
+  //   draw_weights(W[i], width, height);
+  // }
 
   return 0;
 }
