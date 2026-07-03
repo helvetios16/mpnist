@@ -4,8 +4,14 @@ CXX      = g++
 CXXFLAGS = -std=c++17 -Wall -O2
 LDLIBS   = -lz
 
+NVCC      = nvcc
+NVCCFLAGS = -std=c++17 -O2
+
 TARGET   = mnist
 OBJS     = mnist.o cnpy.o
+
+CUDA_TARGET = mlp_cuda
+CUDA_OBJS   = mlp_cuda.o cnpy.o
 
 # Objetivo por defecto: compila el ejecutable
 all: $(TARGET)
@@ -26,8 +32,20 @@ cnpy.o: cnpy.cc cnpy.h
 run: $(TARGET)
 	./$(TARGET)
 
-# Borra los objetos y el ejecutable generados
-clean:
-	rm -f $(TARGET) $(OBJS)
+# Version CUDA (requiere nvcc y una GPU NVIDIA; no corre en Apple Silicon)
+cuda: $(CUDA_TARGET)
 
-.PHONY: all run clean
+$(CUDA_TARGET): $(CUDA_OBJS)
+	$(NVCC) $(NVCCFLAGS) $(CUDA_OBJS) $(LDLIBS) -o $(CUDA_TARGET)
+
+mlp_cuda.o: mlp_cuda.cu cnpy.h
+	$(NVCC) $(NVCCFLAGS) -c mlp_cuda.cu -o mlp_cuda.o
+
+run-cuda: $(CUDA_TARGET)
+	./$(CUDA_TARGET)
+
+# Borra los objetos y los ejecutables generados
+clean:
+	rm -f $(TARGET) $(CUDA_TARGET) $(OBJS) mlp_cuda.o
+
+.PHONY: all run cuda run-cuda clean
