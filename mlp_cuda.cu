@@ -84,6 +84,87 @@ static int argmax(const float *scores, int n) {
   return best;
 }
 
+// Dibuja la imagen 'n' como arte ASCII con su etiqueta y un marco (igual que
+// draw_image en mnist.cc).
+static void draw_image(const unsigned char *imgs, const unsigned char *labels,
+                       size_t n, size_t height, size_t width) {
+  static const char *ramp[] = {" ", "░", "▒", "▓", "█"};
+  const int levels = 5;
+  const size_t pixel_per_img = height * width;
+  const unsigned char *img = imgs + n * pixel_per_img;
+
+  auto horizontal_border = [width](const char *left, const char *mid,
+                                   const char *right) {
+    std::cout << left;
+    for (size_t col = 0; col < width; col++)
+      std::cout << mid;
+    std::cout << right << "\n";
+  };
+
+  std::cout << "Label = " << static_cast<int>(labels[n]) << "\n";
+  horizontal_border("┌", "─", "┐");
+  for (size_t row = 0; row < height; row++) {
+    std::cout << "│";
+    for (size_t col = 0; col < width; col++) {
+      unsigned char p = img[row * width + col];
+      int level = (p * (levels - 1)) / 255;
+      std::cout << ramp[level];
+    }
+    std::cout << "│\n";
+  }
+  horizontal_border("└", "─", "┘");
+}
+
+// Dibuja los pesos de una clase como mapa de calor ASCII (igual que
+// draw_weights en mnist.cc).
+static void draw_weights(const std::vector<float> &weights, size_t width,
+                         size_t height) {
+  float wmin = 1e9f, wmax = -1e9f;
+  for (float w : weights) {
+    if (w > wmax)
+      wmax = w;
+    if (w < wmin)
+      wmin = w;
+  }
+
+  auto horizontal_border = [width](const char *left, const char *mid,
+                                   const char *right) {
+    std::cout << left;
+    for (size_t col = 0; col < width; col++)
+      std::cout << mid;
+    std::cout << right << "\n";
+  };
+
+  static const char *ramp[] = {" ", "░", "▒", "▓", "█"};
+  const int levels = 5;
+
+  std::cout << "weights\n";
+  horizontal_border("┌", "─", "┐");
+  for (size_t row = 0; row < height; row++) {
+    std::cout << "│";
+    for (size_t col = 0; col < width; col++) {
+      float w = weights[row * width + col];
+      int level = static_cast<int>((w - wmin) / (wmax - wmin) * (levels - 1));
+      std::cout << ramp[level];
+    }
+    std::cout << "│\n";
+  }
+  horizontal_border("└", "─", "┘");
+}
+
+// Corre el kernel en modo prediccion (sin actualizar pesos) y devuelve la
+// clase con mayor score.
+static int predict_gpu(const float *x_dev, float *W_dev, float *B_dev,
+                       float *scores_dev, float *scores_host,
+                       size_t pixel_per_img, size_t shared_bytes) {
+  perceptron_step_kernel<<<NUM_CLASSES, BLOCK_SIZE, shared_bytes>>>(
+      x_dev, W_dev, B_dev, scores_dev, pixel_per_img, 0.0f, -1, false);
+  CUDA_CHECK(cudaGetLastError());
+  CUDA_CHECK(cudaMemcpy(scores_host, scores_dev, NUM_CLASSES * sizeof(float),
+                        cudaMemcpyDeviceToHost));
+  return argmax(scores_host, NUM_CLASSES);
+}
+
 int main() {
   cnpy::npz_t data = cnpy::npz_load("mnist.npz");
   cnpy::NpyArray x_train = data["x_train"];
@@ -152,21 +233,41 @@ int main() {
               << "%\n";
   }
 
+  // Pruebas pequenas: dibuja unas imagenes de test y compara la prediccion
+  // del modelo ya entrenado contra la etiqueta real.
+  std::cout << "\n--- Pruebas ---\n";
+  const size_t num_demo = 5;
+  for (size_t i = 0; i < num_demo && i < count_test; i++) {
+    draw_image(imgs_test, labels_test, i, height, width);
+    const int pred =
+        predict_gpu(X_test_dev + i * pixel_per_img, W_dev, B_dev, scores_dev,
+                    scores_host, pixel_per_img, shared_bytes);
+    std::cout << "Prediccion: " << pred
+              << " | Real: " << static_cast<int>(labels_test[i]) << "\n\n";
+  }
+
   int successes = 0;
   for (size_t i = 0; i < count_test; i++) {
-    const float *x = X_test_dev + i * pixel_per_img;
     const int label = static_cast<int>(labels_test[i]);
-
-    perceptron_step_kernel<<<NUM_CLASSES, BLOCK_SIZE, shared_bytes>>>(
-        x, W_dev, B_dev, scores_dev, pixel_per_img, lr, label, false);
-    CUDA_CHECK(cudaGetLastError());
-
-    CUDA_CHECK(cudaMemcpy(scores_host, scores_dev, NUM_CLASSES * sizeof(float),
-                          cudaMemcpyDeviceToHost));
-    if (argmax(scores_host, NUM_CLASSES) == label)
+    const int pred =
+        predict_gpu(X_test_dev + i * pixel_per_img, W_dev, B_dev, scores_dev,
+                    scores_host, pixel_per_img, shared_bytes);
+    if (pred == label)
       successes++;
   }
   std::cout << "Results: " << 100.0 * successes / count_test << "%\n";
+
+  // Pesos aprendidos por cada clase, igual que al final de mnist.cc.
+  std::vector<float> W_host(NUM_CLASSES * pixel_per_img);
+  CUDA_CHECK(cudaMemcpy(W_host.data(), W_dev,
+                        NUM_CLASSES * pixel_per_img * sizeof(float),
+                        cudaMemcpyDeviceToHost));
+  for (int k = 0; k < NUM_CLASSES; k++) {
+    std::vector<float> Wk(W_host.begin() + k * pixel_per_img,
+                          W_host.begin() + (k + 1) * pixel_per_img);
+    std::cout << k << " ";
+    draw_weights(Wk, width, height);
+  }
 
   cudaFree(X_train_dev);
   cudaFree(X_test_dev);
