@@ -1,8 +1,11 @@
 #include "cnpy.h"
+#include <algorithm>
 #include <cerrno>
+#include <cmath>
 #include <cstddef>
 #include <cstdio>
 #include <iostream>
+#include <random>
 #include <set>
 #include <vector>
 
@@ -165,6 +168,9 @@ std::vector<float> build_dataset(const std::vector<int> &data,
   return X;
 }
 
+// Perceptron multiclase (0-9): 10 unidades lineales one-vs-all, sin capa
+// oculta. Cada clase tiene su propio W/b y compite por argmax(score).
+
 float score(const std::vector<float> &weights, float bias, const float *x) {
   float z = bias;
   for (size_t i = 0; i < weights.size(); i++) {
@@ -236,6 +242,216 @@ void evaluate_multi(const std::vector<float> &X, const std::vector<int> &X_test,
       succeses++;
   }
   std::cout << "Results: " << 100.0 * succeses / X_test.size() << "%\n";
+}
+
+// MLP (perceptron multicapa): 784 -> 128 (ReLU) -> 10 (softmax), entrenado
+// con backpropagation + descenso de gradiente.
+
+// Agrupa los 4 grupos de parametros del MLP.
+struct MLP {
+  std::vector<std::vector<float>> W1; // hidden x input  (entrada -> oculta)
+  std::vector<float> b1;              // hidden          (sesgos oculta)
+  std::vector<std::vector<float>> W2; // output x hidden (oculta -> salida)
+  std::vector<float> b2;              // output          (sesgos salida)
+};
+
+// Valores intermedios de un forward pass (se reutilizan en el backward).
+struct Forward {
+  std::vector<float> z1, a1; // capa oculta: suma ponderada y activacion ReLU
+  std::vector<float> z2, y;  // capa salida: logits y probabilidades softmax
+};
+
+// Gradientes de los 4 grupos de parametros, misma forma que MLP.
+struct Grads {
+  std::vector<std::vector<float>> dW1, dW2;
+  std::vector<float> db1, db2;
+};
+
+// Inicializacion: pesos ~ N(0, sqrt(2/fan_in)), sesgos en 0. Necesaria
+// porque, a diferencia del perceptron, iniciar todo en cero deja a las
+// neuronas ocultas identicas para siempre (nunca se diferencian).
+void init_mlp(MLP &net, size_t input, size_t hidden, size_t output) {
+  std::mt19937 gen(42); // semilla fija -> reproducible
+  std::normal_distribution<float> d1(0.0f, std::sqrt(2.0f / input));
+  std::normal_distribution<float> d2(0.0f, std::sqrt(2.0f / hidden));
+
+  net.W1.assign(hidden, std::vector<float>(input));
+  for (size_t i = 0; i < hidden; i++)
+    for (size_t j = 0; j < input; j++)
+      net.W1[i][j] = d1(gen);
+  net.b1.assign(hidden, 0.0f);
+
+  net.W2.assign(output, std::vector<float>(hidden));
+  for (size_t k = 0; k < output; k++)
+    for (size_t j = 0; j < hidden; j++)
+      net.W2[k][j] = d2(gen);
+  net.b2.assign(output, 0.0f);
+}
+
+Forward forward(const MLP &net, const float *x) {
+  Forward out;
+  const size_t hidden = net.b1.size();
+  const size_t output = net.b2.size();
+  const size_t input = net.W1[0].size();
+
+  // Capa oculta: z1 = W1*x + b1, luego a1 = ReLU(z1)
+  out.z1.assign(hidden, 0.0f);
+  out.a1.assign(hidden, 0.0f);
+  for (size_t i = 0; i < hidden; i++) {
+    float z = net.b1[i];
+    for (size_t j = 0; j < input; j++)
+      z += net.W1[i][j] * x[j];
+    out.z1[i] = z;
+    out.a1[i] = (z > 0) ? z : 0.0f; // ReLU
+  }
+
+  // Capa salida: z2 = W2*a1 + b2
+  out.z2.assign(output, 0.0f);
+  for (size_t k = 0; k < output; k++) {
+    float z = net.b2[k];
+    for (size_t j = 0; j < hidden; j++)
+      z += net.W2[k][j] * out.a1[j];
+    out.z2[k] = z;
+  }
+
+  // Softmax sobre z2 (resta del maximo por estabilidad numerica)
+  out.y.assign(output, 0.0f);
+  float max_z = *std::max_element(out.z2.begin(), out.z2.end());
+  float sum = 0.0f;
+  for (size_t k = 0; k < output; k++) {
+    out.y[k] = std::exp(out.z2[k] - max_z);
+    sum += out.y[k];
+  }
+  for (size_t k = 0; k < output; k++)
+    out.y[k] /= sum;
+
+  return out;
+}
+
+// Cross-entropy de un ejemplo: -log de la probabilidad dada al correcto.
+float cross_entropy(const std::vector<float> &y, int label) {
+  float p = y[label];
+  return -std::log(p + 1e-9f); // +epsilon para no calcular log(0)
+}
+
+// Backprop para un ejemplo. Reparte la culpa del error hacia atras,
+// capa por capa, usando la regla de la cadena.
+Grads backward(const MLP &net, const Forward &fwd, const float *x, int label) {
+  Grads g;
+  const size_t hidden = net.b1.size();
+  const size_t output = net.b2.size();
+  const size_t input = net.W1[0].size();
+
+  g.dW2.assign(output, std::vector<float>(hidden));
+  g.db2.assign(output, 0.0f);
+  g.dW1.assign(hidden, std::vector<float>(input));
+  g.db1.assign(hidden, 0.0f);
+
+  // dz2 = y - t   (t = one-hot del label correcto). Es el "regalo" de
+  // combinar softmax con cross-entropy: el gradiente se simplifica a esto.
+  std::vector<float> dz2(output);
+  for (size_t k = 0; k < output; k++)
+    dz2[k] = fwd.y[k];
+  dz2[label] -= 1.0f;
+
+  // Gradientes capa salida: dW2[k][j] = dz2[k] * a1[j] ; db2[k] = dz2[k]
+  for (size_t k = 0; k < output; k++) {
+    for (size_t j = 0; j < hidden; j++)
+      g.dW2[k][j] = dz2[k] * fwd.a1[j];
+    g.db2[k] = dz2[k];
+  }
+
+  // Propagar el error hacia la capa oculta: da1 = W2^T * dz2
+  std::vector<float> da1(hidden, 0.0f);
+  for (size_t k = 0; k < output; k++)
+    for (size_t j = 0; j < hidden; j++)
+      da1[j] += net.W2[k][j] * dz2[k];
+
+  // Cruzar la ReLU: si z1 <= 0 el gradiente no fluye (se corta a 0).
+  std::vector<float> dz1(hidden);
+  for (size_t j = 0; j < hidden; j++)
+    dz1[j] = (fwd.z1[j] > 0) ? da1[j] : 0.0f;
+
+  // Gradientes capa oculta: dW1[i][j] = dz1[i] * x[j] ; db1[i] = dz1[i]
+  for (size_t i = 0; i < hidden; i++) {
+    for (size_t j = 0; j < input; j++)
+      g.dW1[i][j] = dz1[i] * x[j];
+    g.db1[i] = dz1[i];
+  }
+
+  return g;
+}
+
+// Entrena por descenso de gradiente sobre el dataset (un ejemplo a la vez):
+// forward -> medir (acierto + perdida) -> backward -> update.
+void train_mlp(MLP &net, const std::vector<float> &X,
+               const std::vector<int> &idx, const unsigned char *labels,
+               size_t pixel_per_img, float lr, int epochs) {
+  const size_t hidden = net.b1.size();
+  const size_t output = net.b2.size();
+  const size_t input = net.W1[0].size();
+
+  for (int e = 0; e < epochs; e++) {
+    int correct = 0;
+    float loss_sum = 0.0f;
+
+    for (size_t i = 0; i < idx.size(); i++) {
+      const float *x = &X[i * pixel_per_img];
+      const int label = static_cast<int>(labels[idx[i]]);
+
+      // 1. Forward: predice las probabilidades.
+      Forward fwd = forward(net, x);
+
+      // 2. Medir: acierto + perdida del ejemplo.
+      int pred = 0;
+      for (size_t k = 1; k < output; k++)
+        if (fwd.y[k] > fwd.y[pred])
+          pred = k;
+      if (pred == label)
+        correct++;
+      loss_sum += cross_entropy(fwd.y, label);
+
+      // 3. Backward: gradiente de cada parametro.
+      Grads g = backward(net, fwd, x, label);
+
+      // 4. Update: parametro -= lr * gradiente.
+      for (size_t k = 0; k < output; k++) {
+        for (size_t j = 0; j < hidden; j++)
+          net.W2[k][j] -= lr * g.dW2[k][j];
+        net.b2[k] -= lr * g.db2[k];
+      }
+      for (size_t h = 0; h < hidden; h++) {
+        for (size_t j = 0; j < input; j++)
+          net.W1[h][j] -= lr * g.dW1[h][j];
+        net.b1[h] -= lr * g.db1[h];
+      }
+    }
+    std::cout << "Epoch " << e + 1 << ": " << 100.0 * correct / idx.size()
+              << "%  loss " << loss_sum / idx.size() << "\n";
+  }
+}
+
+// Prediccion: argmax de las probabilidades del forward.
+int predict_mlp(const MLP &net, const float *x) {
+  Forward fwd = forward(net, x);
+  int best = 0;
+  for (size_t k = 1; k < fwd.y.size(); k++)
+    if (fwd.y[k] > fwd.y[best])
+      best = k;
+  return best;
+}
+
+// Evaluacion: cuenta aciertos sobre el set de prueba.
+void evaluate_mlp(const MLP &net, const std::vector<float> &X,
+                  const std::vector<int> &idx, const unsigned char *labels,
+                  size_t pixel_per_img) {
+  int correct = 0;
+  for (size_t i = 0; i < idx.size(); i++) {
+    const float *x = &X[i * pixel_per_img];
+    if (predict_mlp(net, x) == labels[idx[i]])
+      correct++;
+  }
+  std::cout << "Results: " << 100.0 * correct / idx.size() << "%\n";
 }
 
 int main() {
@@ -363,6 +579,13 @@ int main() {
     std::cout << i << " ";
     draw_weights(W[i], width, height);
   }
+
+  // MLP: 784 -> 128 -> 10
+  std::cout << "\nMLP\n";
+  MLP net;
+  init_mlp(net, pixel_per_img, 128, 10);
+  train_mlp(net, X_train_all, XA_train, labels, pixel_per_img, 0.01f, 5);
+  evaluate_mlp(net, X_test_all, XA_test, labels_test, pixel_per_img);
 
   return 0;
 }
