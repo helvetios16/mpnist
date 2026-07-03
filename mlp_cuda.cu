@@ -368,7 +368,7 @@ int main() {
   std::vector<float> X_test =
       build_dataset(imgs_test, count_test, pixel_per_img);
 
-  const float lr = 0.1f;
+  float lr = 0.1f;
   const int epochs = 5;
 
   float *X_train_dev, *X_test_dev, *W_dev, *B_dev, *scores_dev;
@@ -454,6 +454,7 @@ int main() {
 
   const int input = static_cast<int>(pixel_per_img);
   const int hidden = HIDDEN;
+  lr = 0.01f;
 
   float *W1_dev, *b1_dev, *W2_dev, *b2_dev;
   float *z1_dev, *a1_dev, *z2_dev, *y_dev, *dz2_dev, *da1_dev;
